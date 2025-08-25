@@ -1,124 +1,199 @@
-import { useMemo, useState } from 'react'
-import { useLocalStorage } from './hooks/useLocalStorage'
-import Toolbar from './components/Toolbar'
-import Modal from './components/Modal'
-import ItemForm from './components/ItemForm'
-import ItemTable from './components/ItemTable'
+import { useState, useEffect } from "react";
+import { getTraders } from "./api";
+import "./App.css";
 
-function uuid(){
-  if (crypto?.randomUUID) return crypto.randomUUID()
-  return String(Date.now()) + '-' + Math.random().toString(16).slice(2)
-}
+export default function App() {
+  const [traders, setTraders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
 
-export default function App(){
-  const [items, setItems] = useLocalStorage('crud-items', demoData)
-  const [q, setQ] = useState('')
-  const [sort, setSort] = useState('-createdAt')
-  const [isOpen, setIsOpen] = useState(false)
-  const [editing, setEditing] = useState(null)
-
-  function addItem(){
-    setEditing(null)
-    setIsOpen(true)
-  }
-  function onSubmit(form){
-    if (editing){
-      setItems(list => list.map(x => x.id===editing.id ? ({ ...x, ...form, updatedAt: Date.now() }) : x))
-    } else {
-      setItems(list => [{ id: uuid(), ...form, createdAt: Date.now(), updatedAt: Date.now() }, ...list])
-    }
-    setIsOpen(false); setEditing(null)
-  }
-  function onEdit(it){ setEditing(it); setIsOpen(true) }
-  function onDelete(id){ if (confirm('Xoá mục này?')) setItems(list => list.filter(x => x.id!==id)) }
-  function onToggle(it){ setItems(list => list.map(x => x.id===it.id ? ({ ...x, status: it.status==='ok'?'pending':'ok', updatedAt: Date.now() }) : x)) }
-  function clearAll(){ if (confirm('Xoá toàn bộ dữ liệu?')) setItems([]) }
-  function exportJson(){
-    const blob = new Blob([JSON.stringify(items, null, 2)], {type: 'application/json'})
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = 'items.json'; a.click()
-    URL.revokeObjectURL(url)
-  }
-  function importJson(e){
-    const file = e.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => {
+  // Fetch traders
+  useEffect(() => {
+    async function fetchTraders() {
       try {
-        const data = JSON.parse(reader.result)
-        if (!Array.isArray(data)) throw new Error('Invalid file')
-        setItems(data)
-        alert('Import thành công')
-      } catch {
-        alert('File không hợp lệ')
+        setLoading(true);
+        setError(null);
+        const result = await getTraders({
+          page,
+          limit: 10,
+          tag: search ? search : undefined,
+        });
+        setTraders(result.items || []);
+        if (page > 2) {
+          setPage(1);
+        }
+      } catch (err) {
+        setError(err.message);
+        setTraders([]);
+      } finally {
+        setLoading(false);
       }
     }
-    reader.readAsText(file)
-    e.target.value = ''
+
+    fetchTraders();
+  }, [page, search]);
+
+  const formatNumber = (num) => {
+    if (!num) return "0";
+    return new Intl.NumberFormat("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(num);
+  };
+
+  const formatPercent = (num) => {
+    if (!num) return "0%";
+    return `${(num * 100).toFixed(2)}%`;
+  };
+
+  const formatWallet = (wallet) => {
+    if (!wallet) return "N/A";
+    return `${wallet.slice(0, 6)}...${wallet.slice(-4)}`;
+  };
+
+  if (loading) {
+    return (
+      <div className="app">
+        <div className="loading">
+          <div className="spinner"></div>
+          <p>Đang tải dữ liệu traders...</p>
+        </div>
+      </div>
+    );
   }
 
-  const filtered = useMemo(() => {
-    const keyword = q.trim().toLowerCase()
-    let list = items.filter(x => !keyword || (x.name.toLowerCase().includes(keyword) || (x.note||'').toLowerCase().includes(keyword)))
-    list.sort((a,b)=>{
-      const dir = sort.startsWith('-') ? -1 : 1
-      const key = sort.replace('-', '')
-      const av = a[key]; const bv = b[key]
-      if (av < bv) return -1*dir
-      if (av > bv) return 1*dir
-      return 0
-    })
-    return list
-  }, [items, q, sort])
+  if (error) {
+    return (
+      <div className="app">
+        <div className="error">
+          <h3>❌ Có lỗi xảy ra</h3>
+          <p>{error}</p>
+          <button onClick={() => window.location.reload()}>Thử lại</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="container">
-      <div className="header">
-        <div className="brand">
-          <div className="dot" /><div>
-            <div style={{fontSize:20, fontWeight:700}}>Quản lý — React</div>
-          </div>
+    <div className="app">
+      <header className="header">
+        <h1>🚀 Sorium Traders</h1>
+        <div className="stats">
+          <span className="stat">📊 {traders.length} traders</span>
+          <span className="stat">📄 Trang {page}</span>
         </div>
-        <div className="row">
-          <button className="button" onClick={exportJson}>Export JSON</button>
-          <label className="button">
-            Import JSON
-            <input type="file" accept="application/json" style={{display:'none'}} onChange={importJson} />
-          </label>
-          <button className="button danger" onClick={clearAll}>Xoá tất cả</button>
+      </header>
+
+      <div className="controls">
+        <input
+          type="text"
+          placeholder="🔍 Tìm theo Wallet"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="search-input"
+        />
+        <div className="pagination">
+          <button
+            onClick={() => setPage((p) => Math.max(1, 2))}
+            disabled={page === 1}
+            className="btn btn-secondary"
+          >
+            ← Trước
+          </button>
+          <span className="page-info">Trang {page}</span>
+          <button
+            onClick={() => setPage((p) => p + 1)}
+            className="btn btn-secondary"
+          >
+            Sau →
+          </button>
         </div>
       </div>
 
-      <div className="card">
-        <div className="card-header">
-          <strong>Danh sách</strong>
-          <span className="small">{filtered.length} mục</span>
-        </div>
-        <div className="card-body">
-          <Toolbar q={q} setQ={setQ} sort={sort} setSort={setSort} onAdd={addItem} />
-        </div>
-        <div className="card-body" style={{paddingTop:0}}>
-          <ItemTable items={filtered} onEdit={onEdit} onDelete={onDelete} onToggle={onToggle} />
-        </div>
+      <div className="table-container">
+        <table className="traders-table">
+          <thead>
+            <tr>
+              <th>Wallet</th>
+              <th>Tag</th>
+              <th>PnL</th>
+              <th>Realized</th>
+              <th>ROI</th>
+              <th>Win Rate</th>
+              <th>Trades (Buy/Sell)</th>
+              <th>Volume</th>
+              <th>Last Active</th>
+            </tr>
+          </thead>
+          <tbody>
+            {traders.map((trader, index) => (
+              <tr key={trader.wallet || index} className="trader-row">
+                <td className="wallet-cell">
+                  <div className="wallet">💰 {formatWallet(trader.wallet)}</div>
+                </td>
+                <td className="tag-cell">
+                  {trader.tag && (
+                    <div className={`tag tag-${trader.tag}`}>
+                      🏷️ {trader.tag}
+                    </div>
+                  )}
+                </td>
+                <td className="numeric-cell">
+                  <span className={trader.pnl >= 0 ? "positive" : "negative"}>
+                    ${formatNumber(trader.pnl)}
+                  </span>
+                </td>
+                <td className="numeric-cell">
+                  <span
+                    className={trader.realized >= 0 ? "positive" : "negative"}
+                  >
+                    ${formatNumber(trader.realized)}
+                  </span>
+                </td>
+                <td className="numeric-cell">
+                  <span className={trader.roi >= 0 ? "positive" : "negative"}>
+                    {formatPercent(trader.roi)}
+                  </span>
+                </td>
+                <td className="numeric-cell">
+                  <span>{formatPercent(trader.winRate)}</span>
+                </td>
+                <td className="trades-cell">
+                  <span>
+                    🟢 {trader.buyCount} / 🔴 {trader.sellCount}
+                  </span>
+                </td>
+                <td className="numeric-cell">
+                  <span>
+                    $
+                    {formatNumber(
+                      (trader.buyUsdAmount + trader.sellUsdAmount) / 2
+                    )}
+                  </span>
+                </td>
+                <td className="date-cell">
+                  {trader.lastActiveAt && (
+                    <span>
+                      {new Date(
+                        trader.lastActiveAt * 1000
+                      ).toLocaleDateString()}
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
-      <div className="footer">
-        <div>{new Date().toLocaleDateString()} • v1.0</div>
-      </div>
-
-      <Modal open={isOpen} title={editing?'Sửa mục':'Thêm mục'} onClose={()=>{setIsOpen(false); setEditing(null)}} footer={null}>
-        <ItemForm initial={editing} onSubmit={onSubmit} />
-      </Modal>
+      {traders.length === 0 && (
+        <div className="empty">
+          <h3>🤷‍♂️ Không tìm thấy traders</h3>
+          <p>Thử thay đổi bộ lọc hoặc trang khác</p>
+        </div>
+      )}
     </div>
-  )
-}
-
-function demoData(){
-  const now = Date.now()
-  return [
-    { id: 'd1', name:'Chuột không dây', quantity:12, price:129000, status:'ok', note:'Logi M331', createdAt: now-86400000*2, updatedAt: now-86400000*2 },
-    { id: 'd2', name:'Bàn phím cơ', quantity:7, price:690000, status:'pending', note:'Red switch', createdAt: now-86400000*1.5, updatedAt: now-86400000*1.5 },
-    { id: 'd3', name:'USB 64GB', quantity:25, price:159000, status:'ok', note:'Sandisk', createdAt: now-3600000*8, updatedAt: now-3600000*8 }
-  ]
+  );
 }
